@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@ludo/core": ["../../packages/core/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

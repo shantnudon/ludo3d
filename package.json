@@ -1,0 +1,12 @@
+{
+  "name": "ludo3d",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "test": "pnpm --filter @ludo/core test",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
