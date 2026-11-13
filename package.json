@@ -5,7 +5,9 @@
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "dev": "pnpm --filter web dev",
+    "dev:server": "pnpm --filter server dev",
     "build": "pnpm --filter web build",
+    "start": "pnpm --filter server start",
     "test": "pnpm --filter @ludo/core test",
     "typecheck": "pnpm -r typecheck"
   }

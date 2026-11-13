@@ -12,21 +12,38 @@ export function Hud() {
   const level = useGame((state) => state.level)
   const mode = useGame((state) => state.mode)
   const muted = useGame((state) => state.muted)
+  const online = useGame((state) => state.online)
   const roll = useGame((state) => state.roll)
   const toggleMute = useGame((state) => state.toggleMute)
   const startGame = useGame((state) => state.startGame)
   const goMenu = useGame((state) => state.goMenu)
+  const leaveOnline = useGame((state) => state.leaveOnline)
 
   const active = game.players[game.current]!
-  const isHumanTurn = !active.isBot
-  const canRoll = isHumanTurn && phase === 'idle' && !busy
+  const mySeat = online ? online.seat : null
+  const myTurn = online ? game.current === mySeat : !active.isBot
+  const canRoll = myTurn && phase === 'idle' && !busy
 
-  let hint = mode === 'pass' ? `${COLOR_LABEL[active.color]}'s turn` : 'Your turn'
-  if (phase === 'rolling') hint = 'Rolling the dice…'
-  else if (phase === 'select') hint = 'Tap a glowing token'
-  else if (phase === 'animating') hint = `${COLOR_LABEL[active.color]} is moving…`
-  else if (game.over) hint = 'Game over'
-  else if (!isHumanTurn) hint = `${COLOR_LABEL[active.color]} is thinking…`
+  const nameOf = (index: number): string => {
+    if (online) {
+      const seat = online.seats[index]
+      if (seat) return seat.index === online.seat ? `${seat.name} (you)` : seat.name
+      return COLOR_LABEL[game.players[index]!.color]
+    }
+    const player = game.players[index]!
+    if (mode === 'solo' && player.color === human) return 'You'
+    return COLOR_LABEL[player.color]
+  }
+
+  let hint: string
+  if (game.over) hint = 'Game over'
+  else if (phase === 'rolling') hint = 'Rolling the dice…'
+  else if (phase === 'select') {
+    hint = myTurn ? 'Tap a glowing token' : `${nameOf(game.current)} is picking…`
+  } else if (phase === 'animating') hint = `${nameOf(game.current)} is moving…`
+  else if (myTurn) hint = mode === 'pass' ? `${nameOf(game.current)}'s turn` : 'Your turn'
+  else if (active.isBot) hint = `${nameOf(game.current)} is thinking…`
+  else hint = `${nameOf(game.current)}'s turn`
 
   return (
     <div className="hud">
@@ -36,7 +53,7 @@ export function Hud() {
         </div>
 
         <div className="players">
-          {game.players.map((player) => {
+          {game.players.map((player, index) => {
             const homes = player.tokens.filter((pos) => pos === POS_HOME).length
             const isActive = player.color === active.color
             const style = { '--accent': COLOR_HEX[player.color] } as CSSProperties
@@ -51,11 +68,7 @@ export function Hud() {
                 style={style}
               >
                 <i className="dot" />
-                <span className="name">
-                  {mode === 'solo' && player.color === human
-                    ? 'You'
-                    : COLOR_LABEL[player.color]}
-                </span>
+                <span className="name">{nameOf(index)}</span>
                 <span className="homes">{homes}/4</span>
               </div>
             )
@@ -93,23 +106,35 @@ export function Hud() {
             <span className="roll-label">ROLL</span>
           </button>
 
-          <button
-            type="button"
-            className="icon"
-            onClick={() => startGame(level)}
-            aria-label="Restart"
-            title="Restart"
-          >
-            ⟳
-          </button>
+          {!online && (
+            <button
+              type="button"
+              className="icon"
+              onClick={() => startGame(level)}
+              aria-label="Restart"
+              title="Restart"
+            >
+              ⟳
+            </button>
+          )}
         </div>
 
         <div className="meta">
-          <button type="button" className="link" onClick={goMenu}>
-            Menu
-          </button>
+          {online ? (
+            <button type="button" className="link" onClick={leaveOnline}>
+              Leave room
+            </button>
+          ) : (
+            <button type="button" className="link" onClick={goMenu}>
+              Menu
+            </button>
+          )}
           <span className="badge">
-            {mode === 'pass' ? 'pass & play' : `${level} bots`}
+            {online
+              ? `room ${online.code}`
+              : mode === 'pass'
+                ? 'pass & play'
+                : `${level} bots`}
           </span>
         </div>
       </div>

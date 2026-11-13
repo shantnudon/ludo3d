@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Scene } from './scene/Scene'
 import { Hud } from './ui/Hud'
+import { Lobby } from './ui/Lobby'
 import { StartMenu } from './ui/StartMenu'
 import { GameOver } from './ui/GameOver'
 import { Toast } from './ui/Toast'
@@ -8,6 +10,16 @@ import { useGame } from './store'
 
 export default function App() {
   const phase = useGame((state) => state.phase)
+  const online = useGame((state) => state.online)
+  const resumeSession = useGame((state) => state.resumeSession)
+
+  useEffect(() => {
+    resumeSession()
+  }, [resumeSession])
+
+  const inLobby = Boolean(online && online.status === 'lobby')
+  const showMenu = !online && phase === 'menu'
+  const showHud = !inLobby && !showMenu
 
   return (
     <div className="app">
@@ -22,9 +34,10 @@ export default function App() {
 
       <div className="vignette" />
 
-      {phase !== 'menu' && <Hud />}
-      {phase === 'menu' && <StartMenu />}
-      {phase === 'over' && <GameOver />}
+      {showHud && <Hud />}
+      {showMenu && <StartMenu />}
+      {inLobby && <Lobby />}
+      {!inLobby && phase === 'over' && <GameOver />}
       <Toast />
     </div>
   )
