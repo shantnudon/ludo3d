@@ -89,3 +89,72 @@ export interface ServerToClientEvents {
   event: (event: GameEvent) => void
   'net:error': (message: string) => void
 }
+
+/* ------------------------------------------------------------------ */
+/* Raw WebSocket protocol used by the Cloudflare Durable Object server */
+/* ------------------------------------------------------------------ */
+
+export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+export function makeRoomCode(): string {
+  const bytes = new Uint8Array(ROOM_CODE_LENGTH)
+  crypto.getRandomValues(bytes)
+  let code = ''
+  for (let i = 0; i < ROOM_CODE_LENGTH; i += 1) {
+    code += ROOM_CODE_ALPHABET[bytes[i]! % ROOM_CODE_ALPHABET.length]
+  }
+  return code
+}
+
+export type ClientMessage =
+  | {
+      t: 'hello'
+      rid: number
+      name: string
+      create?: boolean
+      playerId?: string
+    }
+  | { t: 'leave' }
+  | { t: 'start' }
+  | { t: 'restart' }
+  | { t: 'roll' }
+  | { t: 'move'; token: number }
+
+export type ServerAck =
+  | {
+      t: 'ack'
+      rid: number
+      ok: true
+      code: string
+      playerId: string
+      seat: number
+      room: RoomSnapshot
+    }
+  | { t: 'ack'; rid: number; ok: false; error: string }
+
+export type ServerMessage =
+  | ServerAck
+  | { t: 'room'; room: RoomSnapshot }
+  | { t: 'game'; game: GameSnapshot }
+  | { t: 'event'; event: GameEvent }
+  | { t: 'error'; message: string }
+
+/** Stored per-room snapshot, used to survive Durable Object eviction. */
+export interface StoredSeat {
+  index: number
+  color: Color
+  name: string
+  playerId: string | null
+  isBot: boolean
+}
+
+export interface StoredRoom {
+  code: string
+  status: RoomStatus
+  hostSeat: number | null
+  seats: StoredSeat[]
+  game: GameState | null
+  phase: NetPhase
+  diceValue: number
+  legal: string[]
+}

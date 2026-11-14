@@ -1,10 +1,11 @@
 # Ludo 3D
 
+**Live:** https://ludo3d.zeekaboo.workers.dev
+
 A genuine 3D Ludo board game that runs in the browser — wooden board, brass inlay,
 glossy pawns, a dice tray on the table and three bots to beat. Play solo, pass one
 device around, or create an online room and share a 4-letter code; empty seats are
-filled by bots. Built so the same rules engine can power more classic board games
-later (Snakes & Ladders, Chess, Carrom…).
+filled by bots. Deployed on Cloudflare Workers + Durable Objects.
 
 ![board](docs/board.png)
 
@@ -39,34 +40,33 @@ later (Snakes & Ladders, Chess, Carrom…).
 | UI | React 19 + plain CSS |
 | State | Zustand |
 | Rules | `@ludo/core` — pure TypeScript, zero Three.js |
-| Online | Socket.IO rooms, server-authoritative turn loop |
+| Online | Cloudflare Workers + one Durable Object per room, native WebSockets |
 | Tests | Vitest (44 tests, 200 seeded full games) |
-| Build | Vite + tsx |
+| Build | Vite + Wrangler (Workers static assets) |
 
 ## Getting started
 
 ```bash
 pnpm install
 pnpm dev          # client  → http://localhost:5173
-pnpm dev:server   # server  → http://localhost:3001   (needed for online rooms)
+pnpm dev:server   # rooms   → http://localhost:3001  (wrangler dev, needed for online)
 pnpm test         # rules + bot test suite
 pnpm build        # typecheck + production build
 ```
 
-Solo and pass & play work without the server. For online rooms run both commands.
+Solo and pass & play work without the room server. For online rooms run both
+commands — the browser connects to `ws://localhost:3001/ws`.
 
-### Production (single process)
+### Deploy to Cloudflare
 
 ```bash
-pnpm build        # builds apps/web/dist
-pnpm start        # serves the client + socket server on :3001
+npx wrangler login   # once, opens the browser
+pnpm deploy          # builds the client, uploads assets + worker + DO
 ```
 
-The server serves `apps/web/dist` when it exists, so the whole game lives on one
-origin. Set `PORT` to change the port, or `VITE_SERVER_URL` at build time if you
-host the socket server elsewhere.
-
-`pnpm dev` also exposes `window.__ludo` (the store) in development for debugging.
+The Worker serves the built client from `apps/web/dist` (SPA fallback) and routes
+`/ws?code=XXXX` to the Durable Object for that room, so everything lives on one
+origin. `pnpm deploy` prints the `*.workers.dev` URL.
 
 ## Project layout
 
@@ -81,16 +81,18 @@ packages/core/            pure game logic, no rendering
 
 apps/web/
   src/store.ts            turn loop: roll → move → animate → next player
-  src/net.ts              socket.io client (dev: :3001, prod: same origin)
+  src/net.ts              native WebSocket client (dev: :3001, prod: same origin)
   src/scene/Board.tsx     board geometry, instanced tiles, base plates, home
   src/scene/Tokens.tsx    pawn mesh, path animation, picking
   src/scene/Dice.tsx      result-driven dice animation, tray
   src/scene/CameraRig.tsx perspective-correct camera fitting + orbit controls
   src/ui/                 HUD, start menu, lobby, standings, toasts
 
-apps/server/
-  src/room.ts             authoritative room: turns, bots, reconnects
-  src/index.ts            express + socket.io wiring, room registry
+apps/edge/                Cloudflare Worker deployment
+  src/index.ts            routes /ws to the room DO, serves static assets
+  src/room-object.ts      Durable Object: sockets, hello/join/rejoin, commands
+  src/room.ts             authoritative room: turns, bots, persistence
+  wrangler.toml           assets + ROOMS binding + SQLite DO migration
 ```
 
 ## Online rooms
@@ -103,14 +105,17 @@ apps/server/
 
 How the server drives it:
 
-- Clients only send intents: `game:roll` and `game:move {token}`.
+- Each room is a single **Durable Object** addressed by its code, so all players
+  of a room hit the same single-threaded instance — no locks, no races.
+- Clients only send intents: `roll` and `move {token}` over a raw WebSocket.
 - The room validates everything with `@ludo/core` — same rules as the browser.
 - The server rolls, resolves legal moves, runs bot turns, and paces the result so
   each client can play the same animation (`TIMING` is shared in `protocol.ts`).
 - A player token is stored in `localStorage`, so a refresh rejoins the same seat.
 - If a player disconnects mid-game the seat is handed to a bot immediately; they
   can still come back and take over again by reopening the invite link.
-- Empty rooms are swept after 30 minutes without connected players.
+- Room state is mirrored into Durable Object storage, so a cold start keeps the
+  table and the bots carry on.
 
 ## Board model
 
@@ -132,7 +137,7 @@ Safe cells: the four start cells plus the star cells eight steps later
 ## Design decisions worth keeping
 
 1. **Logic never imports Three.js.** The whole game is replayed, tested and run
-   authoritatively on the socket server with the exact same package.
+   authoritatively inside the Cloudflare Durable Object with the same package.
 2. **The dice result comes first, the animation follows.** The RNG decides the
    value, then the die is animated onto that face. This removes a whole class of
    “the dice showed six but I moved three” bugs and makes online play cheat-proof.

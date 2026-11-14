@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import {
   COLORS,
   TIMING,
@@ -12,18 +11,19 @@ import {
   type Color,
   type GameEvent,
   type GameSnapshot,
+  type GameState,
   type Move,
   type NetPhase,
   type RoomSnapshot,
   type RoomStatus,
   type SeatInfo,
+  type ServerMessage,
+  type StoredRoom,
 } from '@ludo/core'
 
-/** How the room talks to the outside world (socket layer implements this). */
-export interface RoomChannels {
-  room(room: Room): void
-  game(room: Room): void
-  event(room: Room, event: GameEvent): void
+export interface RoomIO {
+  emit(message: ServerMessage): void
+  persist(): void
 }
 
 interface Seat {
@@ -35,36 +35,36 @@ interface Seat {
   isBot: boolean
 }
 
-const DEFAULT_NAME = 'Player'
 const BOT_LEVEL: BotLevel = 'medium'
+const DEFAULT_NAME = 'Player'
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 /**
- * One online table.
+ * One authoritative room, living inside a Durable Object.
  *
- * The server is authoritative: clients only send intents (`roll`, `move`) and
- * the room applies them with the same rules package the browser uses. Empty
- * seats are turned into bots when the host starts.
+ * The object is addressed by its room code, so every player of a room reaches
+ * the same single-threaded instance — no locks, no race conditions. State is
+ * mirrored into DO storage so a cold start keeps the table.
  */
 export class Room {
   readonly code: string
   status: RoomStatus = 'lobby'
   hostSeat: number | null = null
   seats: Seat[]
-  game: ReturnType<typeof createGame> | null = null
+  game: GameState | null = null
   phase: NetPhase = 'idle'
   diceValue = 0
   legal: string[] = []
 
-  private channels: RoomChannels
+  private io: RoomIO
   private generation = 0
   private selectTimer: ReturnType<typeof setTimeout> | null = null
-  private lastActivity = Date.now()
+  private disposed = false
 
-  constructor(code: string, channels: RoomChannels) {
+  constructor(code: string, io: RoomIO) {
     this.code = code
-    this.channels = channels
+    this.io = io
     this.seats = COLORS.map((color, index) => ({
       index,
       color,
@@ -73,10 +73,6 @@ export class Room {
       connected: false,
       isBot: false,
     }))
-  }
-
-  get lastSeen(): number {
-    return this.lastActivity
   }
 
   hasPlayers(): boolean {
@@ -117,21 +113,89 @@ export class Room {
     }
   }
 
-  // ------------------------------------------------------------- membership
+  // ------------------------------------------------------------ storage
+
+  toStored(): StoredRoom {
+    return {
+      code: this.code,
+      status: this.status,
+      hostSeat: this.hostSeat,
+      seats: this.seats.map((seat) => ({
+        index: seat.index,
+        color: seat.color,
+        name: seat.name,
+        playerId: seat.playerId,
+        isBot: seat.isBot,
+      })),
+      game: this.game,
+      phase: this.phase,
+      diceValue: this.diceValue,
+      legal: this.legal,
+    }
+  }
+
+  restore(stored: StoredRoom): void {
+    this.status = stored.status
+    this.hostSeat = stored.hostSeat
+    this.game = stored.game
+    this.phase =
+      stored.phase === 'rolling' || stored.phase === 'animating'
+        ? 'idle'
+        : stored.phase
+    this.diceValue = stored.diceValue
+    this.legal = stored.phase === 'select' ? stored.legal : []
+    this.seats = stored.seats.map((seat, index) => ({
+      index,
+      color: seat.color,
+      name: seat.name,
+      playerId: seat.playerId,
+      isBot: seat.isBot,
+      connected: false,
+    }))
+    if (this.game) {
+      this.seats.forEach((seat) => {
+        this.game!.players[seat.index]!.isBot = seat.isBot
+      })
+    }
+  }
+
+  /** Called after a cold start: nudge the turn loop back to life. */
+  resume(): void {
+    if (this.status !== 'playing' || !this.game) return
+    if (this.phase === 'select' && this.seats[this.game.current]?.isBot) {
+      this.botChoose()
+      return
+    }
+    if (this.phase === 'select') {
+      this.armSelectTimeout()
+      return
+    }
+    this.phase = 'idle'
+    this.emitGame()
+    this.maybeBot()
+  }
+
+  /** Push the full table state to everyone (used after a join/reconnect). */
+  broadcastState(): void {
+    this.emitRoom()
+    if (this.game) this.emitGame()
+  }
+
+  // ---------------------------------------------------------- membership
 
   join(name: string): { seat: number; playerId: string } | null {
     if (this.status !== 'lobby') return null
     const seat = this.seats.find((candidate) => candidate.playerId === null)
     if (!seat) return null
 
-    seat.playerId = randomUUID()
+    seat.playerId = crypto.randomUUID()
     seat.name = name || `${DEFAULT_NAME} ${seat.index + 1}`
     seat.connected = true
     seat.isBot = false
     this.hostSeat ??= seat.index
 
-    this.touch()
     this.emitRoom()
+    this.emitGame()
     return { seat: seat.index, playerId: seat.playerId }
   }
 
@@ -144,13 +208,12 @@ export class Room {
     if (this.game) this.game.players[seat.index]!.isBot = false
     if (this.hostSeat === null) this.hostSeat = seat.index
 
-    this.touch()
     this.emitRoom()
     if (this.game) this.emitGame()
+    this.maybeBot()
     return seat.index
   }
 
-  /** Socket dropped: keep the seat, hand control to a bot until they return. */
   disconnect(playerId: string): void {
     const seat = this.seatOf(playerId)
     if (!seat) return
@@ -168,7 +231,6 @@ export class Room {
     this.handToBot(seat)
   }
 
-  /** Explicit leave: the seat is freed immediately. */
   leave(playerId: string): void {
     const seat = this.seatOf(playerId)
     if (!seat) return
@@ -191,7 +253,6 @@ export class Room {
     seat.name = 'Bot'
     if (this.game) this.game.players[seat.index]!.isBot = true
 
-    this.touch()
     this.emitRoom()
     if (this.game) this.emitGame()
 
@@ -224,7 +285,6 @@ export class Room {
         seat.name = `Bot ${seat.index + 1}`
         seat.connected = false
       }
-      seat.connected = seat.playerId !== null ? seat.connected : false
     }
 
     const game = createGame(humans)
@@ -233,8 +293,9 @@ export class Room {
     })
 
     const host = this.hostSeat !== null ? this.seats[this.hostSeat] : undefined
-    if (host && host.playerId) game.current = host.index
-    else game.current = this.seats.find((seat) => seat.playerId)!.index
+    game.current = host?.playerId
+      ? host.index
+      : this.seats.find((seat) => seat.playerId)!.index
 
     this.game = game
     this.status = 'playing'
@@ -242,7 +303,6 @@ export class Room {
     this.diceValue = 0
     this.legal = []
     this.generation += 1
-    this.touch()
 
     this.emitRoom()
     this.emitGame()
@@ -263,7 +323,6 @@ export class Room {
       seat.name = seat.playerId ? seat.name : 'Open'
     }
     this.refreshHost()
-    this.touch()
     this.emitRoom()
   }
 
@@ -288,12 +347,11 @@ export class Room {
     this.game = result.state
     this.diceValue = result.value
     this.phase = 'rolling'
-    this.touch()
     this.emitGame()
     this.emitEvent({ type: 'roll', value: result.value, forfeit: result.forfeit })
 
     await sleep(TIMING.roll)
-    if (generation !== this.generation) return
+    if (this.disposed || generation !== this.generation) return
 
     if (result.forfeit) {
       this.finishTurn()
@@ -305,7 +363,7 @@ export class Room {
     if (moves.length === 0) {
       this.emitEvent({ type: 'noMove' })
       await sleep(TIMING.noMove)
-      if (generation !== this.generation) return
+      if (this.disposed || generation !== this.generation) return
       this.finishTurn()
       return
     }
@@ -320,7 +378,7 @@ export class Room {
       this.phase = 'animating'
       this.emitGame()
       await sleep(TIMING.botThink)
-      if (generation !== this.generation) return
+      if (this.disposed || generation !== this.generation) return
       const move = chooseMove(this.game, moves, BOT_LEVEL, Math.random)
       await this.applyMove(move, generation)
       return
@@ -330,11 +388,7 @@ export class Room {
     this.legal = moves.map((move) => `${move.player}-${move.token}`)
     this.emitGame()
     this.emitEvent({ type: 'select', state: this.game, legal: this.legal })
-    this.selectTimer = setTimeout(() => {
-      if (this.generation === generation && this.phase === 'select') {
-        this.botChoose()
-      }
-    }, TIMING.selectTimeout)
+    this.armSelectTimeout()
   }
 
   move(playerId: string, token: number): void {
@@ -375,12 +429,11 @@ export class Room {
 
     this.game = after
     this.phase = 'animating'
-    this.touch()
     this.emitGame()
     this.emitEvent({ type: 'move', move, prev: previous, state: after, cells })
 
     await sleep(wait)
-    if (generation !== this.generation) return
+    if (this.disposed || generation !== this.generation) return
 
     if (after.over) {
       this.status = 'finished'
@@ -398,7 +451,6 @@ export class Room {
     if (!this.game) return
     this.game = endTurn(this.game)
     this.phase = 'idle'
-    this.touch()
     this.emitGame()
     this.emitEvent({ type: 'turn', state: this.game })
     this.maybeBot()
@@ -412,38 +464,51 @@ export class Room {
     const generation = this.generation
     const delay = TIMING.botThink + Math.random() * 500
     setTimeout(() => {
-      if (generation !== this.generation) return
+      if (this.disposed || generation !== this.generation) return
       if (this.phase !== 'idle' || !this.game || this.game.over) return
       void this.roll(null)
     }, delay)
   }
 
-  private clearSelect(): void {
+  private armSelectTimeout(): void {
+    this.clearSelectTimer()
+    if (this.phase !== 'select') return
+    const generation = this.generation
+    this.selectTimer = setTimeout(() => {
+      if (this.disposed || generation !== this.generation) return
+      if (this.phase === 'select') this.botChoose()
+    }, TIMING.selectTimeout)
+  }
+
+  private clearSelectTimer(): void {
     if (this.selectTimer) {
       clearTimeout(this.selectTimer)
       this.selectTimer = null
     }
+  }
+
+  private clearSelect(): void {
+    this.clearSelectTimer()
     this.legal = []
   }
 
   dispose(): void {
+    this.disposed = true
     this.generation += 1
     this.clearSelect()
   }
 
-  private touch(): void {
-    this.lastActivity = Date.now()
-  }
-
   private emitRoom(): void {
-    this.channels.room(this)
+    this.io.emit({ t: 'room', room: this.snapshot() })
+    this.io.persist()
   }
 
   private emitGame(): void {
-    this.channels.game(this)
+    this.io.emit({ t: 'game', game: this.gameSnapshot() })
+    this.io.persist()
   }
 
   private emitEvent(event: GameEvent): void {
-    this.channels.event(this, event)
+    this.io.emit({ t: 'event', event })
   }
 }

@@ -3,13 +3,14 @@ import {
   BASE_SPOTS,
   COLORS,
   POS_HOME,
+  makeRoomCode,
   type BotLevel,
   type Cell,
   type Color,
   type GameEvent,
   type GameState,
-  type JoinAck,
   type Move,
+  type RoomSnapshot,
   type RoomStatus,
   type SeatInfo,
   cellFor,
@@ -21,7 +22,7 @@ import {
   roll as rollDie,
 } from '@ludo/core'
 import { sfx } from './audio'
-import { getSocket } from './net'
+import { RoomSocket } from './net'
 
 export type Phase = 'menu' | 'idle' | 'rolling' | 'select' | 'animating' | 'over'
 
@@ -51,6 +52,13 @@ export interface OnlineState {
   canStart: boolean
 }
 
+interface JoinResult {
+  code: string
+  playerId: string
+  seat: number
+  room: RoomSnapshot
+}
+
 export const DICE_ANIM_MS = 1150
 
 const NAME_KEY = 'ludo3d:name'
@@ -58,8 +66,21 @@ const SESSION_KEY = 'ludo3d:room'
 const keyOf = (player: number, token: number) => `${player}-${token}`
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
+const NET_ERRORS: Record<string, string> = {
+  'code-in-use': 'That code is taken, retrying…',
+  'room-not-found': 'Room not found. Check the code.',
+  'game-started': 'That game already started.',
+  'room-full': 'Room is full.',
+  'not-in-room': 'You are not in this room anymore.',
+  'could-not-create': 'Could not create the room, try again.',
+  'connect-failed': 'Game server not reachable. Try again.',
+  timeout: 'The server did not answer. Try again.',
+}
+
+const netErrorText = (error: unknown): string =>
+  NET_ERRORS[(error as Error)?.message ?? ''] ?? 'Something went wrong. Try again.'
+
 let toastSeq = 0
-let socketWired = false
 
 function readName(): string {
   try {
@@ -132,6 +153,10 @@ interface GameStore {
 }
 
 export const useGame = create<GameStore>((set, get) => {
+  let connection: RoomSocket | null = null
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectAttempts = 0
+
   const notify = (text: string) => {
     const id = ++toastSeq
     set({ toast: { id, text } })
@@ -313,17 +338,22 @@ export const useGame = create<GameStore>((set, get) => {
     })
   }
 
-  const applyJoin = (ack: Extract<JoinAck, { ok: true }>) => {
-    saveSession(ack.code, ack.playerId)
+  const applyJoin = (result: JoinResult) => {
+    reconnectAttempts = 0
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    saveSession(result.code, result.playerId)
     set({
       online: {
-        code: ack.code,
-        playerId: ack.playerId,
-        seat: ack.seat,
-        status: ack.room.status,
-        seats: ack.room.seats,
-        hostSeat: ack.room.hostSeat,
-        canStart: ack.room.canStart,
+        code: result.code,
+        playerId: result.playerId,
+        seat: result.seat,
+        status: result.room.status,
+        seats: result.room.seats,
+        hostSeat: result.room.hostSeat,
+        canStart: result.room.canStart,
       },
       mode: 'online',
       netBusy: false,
@@ -397,12 +427,8 @@ export const useGame = create<GameStore>((set, get) => {
     }
   }
 
-  const wireSocket = () => {
-    const socket = getSocket()
-    if (socketWired) return socket
-    socketWired = true
-
-    socket.on('room', (room) => {
+  const attach = (socket: RoomSocket) => {
+    socket.onRoom((room) => {
       const online = get().online
       if (!online) return
       set({
@@ -416,7 +442,7 @@ export const useGame = create<GameStore>((set, get) => {
       })
     })
 
-    socket.on('game', (snapshot) => {
+    socket.onGame((snapshot) => {
       const online = get().online
       if (!online) return
       set({
@@ -430,33 +456,53 @@ export const useGame = create<GameStore>((set, get) => {
       })
     })
 
-    socket.on('event', handleEvent)
-    socket.on('net:error', (message) => set({ netError: message }))
-    socket.on('connect_error', () =>
-      set({
-        netError:
-          'Game server not reachable. Start it with "pnpm dev:server" and try again.',
-        netBusy: false,
-      }),
-    )
+    socket.onEvent(handleEvent)
 
-    socket.on('connect', () => {
+    socket.onClose(() => {
+      if (connection !== socket) return
+      connection = null
       const online = get().online
-      const session = online
-        ? { code: online.code, playerId: online.playerId }
-        : readSession()
-      if (!session) return
-      socket.emit('room:rejoin', session, (ack) => {
-        if (!ack.ok) {
-          clearSession()
-          set({ online: null, netError: ack.error })
-          return
-        }
-        applyJoin(ack)
-      })
+      if (!online) return
+      set({ netError: 'Connection lost — reconnecting…' })
+      scheduleReconnect(online.code, online.playerId)
     })
+  }
 
-    return socket
+  const scheduleReconnect = (code: string, playerId: string) => {
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    if (reconnectAttempts >= 6) {
+      clearSession()
+      set({
+        online: null,
+        netError: 'Connection lost. Reopen the invite link to rejoin.',
+      })
+      return
+    }
+    const delay = 1200 + reconnectAttempts * 700
+    reconnectAttempts += 1
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      void (async () => {
+        try {
+          const result = await RoomSocket.open({
+            code,
+            playerId,
+            name: get().name,
+          })
+          connection = result.socket
+          attach(result.socket)
+          applyJoin(result)
+        } catch (error) {
+          const reason = (error as Error).message
+          if (reason === 'not-in-room' || reason === 'room-not-found') {
+            clearSession()
+            set({ online: null, netError: 'That room is gone.' })
+            return
+          }
+          scheduleReconnect(code, playerId)
+        }
+      })()
+    }, delay)
   }
 
   return {
@@ -507,7 +553,7 @@ export const useGame = create<GameStore>((set, get) => {
       if (state.online) {
         if (state.phase !== 'idle' || state.game.over) return
         if (state.game.current !== state.online.seat) return
-        getSocket().emit('game:roll')
+        connection?.send({ t: 'roll' })
         return
       }
       await rollNow()
@@ -516,8 +562,10 @@ export const useGame = create<GameStore>((set, get) => {
     selectToken: async (player, token) => {
       const state = get()
       if (state.online) {
-        if (state.phase !== 'select' || state.game.current !== state.online.seat) return
-        getSocket().emit('game:move', { token })
+        if (state.phase !== 'select' || state.game.current !== state.online.seat) {
+          return
+        }
+        connection?.send({ t: 'move', token })
         set({ legalKeys: [] })
         return
       }
@@ -550,48 +598,71 @@ export const useGame = create<GameStore>((set, get) => {
     },
 
     createRoom: () => {
-      const socket = wireSocket()
-      if (!socket.connected) socket.connect()
+      if (get().netBusy) return
       set({ netBusy: true, netError: null })
-      socket.emit('room:create', { name: get().name }, (ack) => {
-        if (!ack.ok) {
-          set({ netBusy: false, netError: ack.error })
-          return
+      void (async () => {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const code = makeRoomCode()
+          try {
+            const result = await RoomSocket.open({
+              code,
+              name: get().name,
+              create: true,
+            })
+            connection = result.socket
+            attach(result.socket)
+            applyJoin(result)
+            sfx.play('click')
+            return
+          } catch (error) {
+            if ((error as Error).message === 'code-in-use') continue
+            set({ netBusy: false, netError: netErrorText(error) })
+            return
+          }
         }
-        sfx.play('click')
-        applyJoin(ack)
-      })
+        set({
+          netBusy: false,
+          netError: 'Could not create a room, please try again.',
+        })
+      })()
     },
 
     joinRoom: (code) => {
-      const socket = wireSocket()
-      if (!socket.connected) socket.connect()
+      const clean = code.trim().toUpperCase()
+      if (clean.length !== 4 || get().netBusy) return
       set({ netBusy: true, netError: null })
-      socket.emit(
-        'room:join',
-        { code: code.trim().toUpperCase(), name: get().name },
-        (ack) => {
-          if (!ack.ok) {
-            set({ netBusy: false, netError: ack.error })
-            return
-          }
+      void (async () => {
+        try {
+          const result = await RoomSocket.open({ code: clean, name: get().name })
+          connection = result.socket
+          attach(result.socket)
+          applyJoin(result)
           sfx.play('click')
-          applyJoin(ack)
-        },
-      )
+        } catch (error) {
+          set({ netBusy: false, netError: netErrorText(error) })
+        }
+      })()
     },
 
     startOnline: () => {
-      getSocket().emit('room:start')
+      connection?.send({ t: 'start' })
     },
 
     restartRoom: () => {
-      getSocket().emit('room:restart')
+      connection?.send({ t: 'restart' })
     },
 
     leaveOnline: () => {
-      const online = get().online
-      if (online) getSocket().emit('room:leave')
+      if (connection) {
+        connection.send({ t: 'leave' })
+        connection.close()
+        connection = null
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      reconnectAttempts = 0
       clearSession()
       set({
         online: null,
@@ -611,18 +682,20 @@ export const useGame = create<GameStore>((set, get) => {
       if (get().online) return
       const session = readSession()
       if (!session) return
-      const socket = wireSocket()
-      if (!socket.connected) {
-        socket.connect()
-        return
-      }
-      socket.emit('room:rejoin', session, (ack) => {
-        if (!ack.ok) {
+      void (async () => {
+        try {
+          const result = await RoomSocket.open({
+            code: session.code,
+            playerId: session.playerId,
+            name: get().name,
+          })
+          connection = result.socket
+          attach(result.socket)
+          applyJoin(result)
+        } catch {
           clearSession()
-          return
         }
-        applyJoin(ack)
-      })
+      })()
     },
   }
 })
