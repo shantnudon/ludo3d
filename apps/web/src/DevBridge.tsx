@@ -11,6 +11,7 @@ import { useGame } from './store'
 export function DevBridge() {
   const camera = useThree((state) => state.camera)
   const size = useThree((state) => state.size)
+  const gl = useThree((state) => state.gl)
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
@@ -20,9 +21,11 @@ export function DevBridge() {
         token: number,
       ) => { x: number; y: number } | null
       __ludoCamera?: THREE.PerspectiveCamera
+      __ludoFrames?: () => number
     }
 
     scope.__ludoCamera = camera as THREE.PerspectiveCamera
+    scope.__ludoFrames = () => gl.info.render.frame
 
     scope.__ludoScreenOfToken = (player, token) => {
       const { game } = useGame.getState()
@@ -40,8 +43,9 @@ export function DevBridge() {
 
     return () => {
       delete scope.__ludoScreenOfToken
+      delete scope.__ludoFrames
     }
-  }, [camera, size])
+  }, [camera, size, gl])
 
   return null
 }

@@ -98,8 +98,8 @@ canvas {
   border-radius: 999px;
   background: var(--panel);
   border: 1px solid var(--stroke);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   font-size: 12px;
   letter-spacing: 0.02em;
   color: #c6d2e3;
@@ -152,8 +152,8 @@ canvas {
   border-radius: 999px;
   background: rgba(9, 13, 22, 0.62);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   font-size: 13px;
   color: #d5dfee;
 }
@@ -220,8 +220,8 @@ canvas {
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   transition: border-color 0.2s ease, transform 0.15s ease;
 }
 
@@ -291,8 +291,8 @@ canvas {
     rgba(6, 9, 15, 0.66),
     rgba(3, 5, 9, 0.95)
   );
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
   animation: fadeIn 0.3s ease-out;
 }
 

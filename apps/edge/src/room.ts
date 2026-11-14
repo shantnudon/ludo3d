@@ -505,7 +505,15 @@ export class Room {
 
   private emitGame(): void {
     this.io.emit({ t: 'game', game: this.gameSnapshot() })
-    this.io.persist()
+    // Only persist stable states. Transient phases (rolling/animating) can be
+    // re-derived, and skipping them halves Durable Object storage writes.
+    if (
+      this.phase === 'idle' ||
+      this.phase === 'select' ||
+      this.phase === 'over'
+    ) {
+      this.io.persist()
+    }
   }
 
   private emitEvent(event: GameEvent): void {

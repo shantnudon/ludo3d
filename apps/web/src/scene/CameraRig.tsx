@@ -14,6 +14,7 @@ const CORNERS = [
 export function CameraRig() {
   const size = useThree((state) => state.size)
   const camera = useThree((state) => state.camera)
+  const invalidate = useThree((state) => state.invalidate)
   const portrait = size.width < size.height
 
   // In landscape the board sits a touch left so the dice tray has room.
@@ -61,7 +62,8 @@ export function CameraRig() {
     }
 
     cam.updateProjectionMatrix()
-  }, [camera, portrait, size.width, size.height, target])
+    invalidate()
+  }, [camera, portrait, size.width, size.height, target, invalidate])
 
   return (
     <OrbitControls

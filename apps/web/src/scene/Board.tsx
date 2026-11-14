@@ -130,6 +130,7 @@ export function Board() {
         <Base key={color} color={color} />
       ))}
 
+      <SpotRings />
       <HomeCenter />
       <SafeMarkers />
     </group>
@@ -139,11 +140,6 @@ export function Board() {
 function Base({ color }: { color: Color }) {
   const [x, z] = toWorld(BASE_ORIGIN[color])
   const hex = COLOR_HEX[color]
-
-  const spots = BASE_SPOTS[color].map((cell) => {
-    const [wx, wz] = toWorld(cell)
-    return [wx - x, wz - z] as const
-  })
 
   return (
     <group position={[x, 0, z]}>
@@ -166,20 +162,48 @@ function Base({ color }: { color: Color }) {
       >
         <meshStandardMaterial color="#f7efdf" roughness={0.62} />
       </RoundedBox>
-
-      {spots.map(([sx, sz], index) => (
-        <mesh
-          key={index}
-          position={[sx, 0.698, sz]}
-          rotation-x={-Math.PI / 2}
-          receiveShadow
-        >
-          <ringGeometry args={[0.235, 0.33, 32]} />
-          <meshStandardMaterial color={hex} roughness={0.4} metalness={0.2} />
-        </mesh>
-      ))}
     </group>
   )
+}
+
+/** All 16 parking-ring markers in a single instanced draw call. */
+function SpotRings() {
+  const mesh = useRef<THREE.InstancedMesh>(null)
+
+  const { geometry, material, spots } = useMemo(() => {
+    const list: Array<{ x: number; z: number; color: THREE.Color }> = []
+    for (const color of COLORS) {
+      for (const cell of BASE_SPOTS[color]) {
+        const [x, z] = toWorld(cell)
+        list.push({ x, z, color: new THREE.Color(COLOR_HEX[color]) })
+      }
+    }
+    return {
+      geometry: new THREE.RingGeometry(0.235, 0.33, 24),
+      material: new THREE.MeshStandardMaterial({
+        roughness: 0.4,
+        metalness: 0.2,
+      }),
+      spots: list,
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const node = mesh.current
+    if (!node) return
+    const dummy = new THREE.Object3D()
+    spots.forEach((spot, index) => {
+      dummy.position.set(spot.x, 0.698, spot.z)
+      dummy.rotation.set(-Math.PI / 2, 0, 0)
+      dummy.updateMatrix()
+      node.setMatrixAt(index, dummy.matrix)
+      node.setColorAt(index, spot.color)
+    })
+    node.instanceMatrix.needsUpdate = true
+    if (node.instanceColor) node.instanceColor.needsUpdate = true
+  }, [spots])
+
+  return <instancedMesh ref={mesh} args={[geometry, material, spots.length]} />
 }
 
 function HomeCenter() {
@@ -255,6 +279,7 @@ function HomeCenter() {
 }
 
 function SafeMarkers() {
+  const mesh = useRef<THREE.InstancedMesh>(null)
   const cells = useMemo(() => {
     const list: Cell[] = []
     for (const color of COLORS) {
@@ -264,23 +289,32 @@ function SafeMarkers() {
     return list
   }, [])
 
-  return (
-    <>
-      {cells.map((cell, index) => {
-        const [x, z] = toWorld(cell)
-        return (
-          <mesh key={index} position={[x, TILE_Y + 0.075, z]} rotation-x={-Math.PI / 2}>
-            <ringGeometry args={[0.15, 0.23, 24]} />
-            <meshStandardMaterial
-              color="#a98a4e"
-              roughness={0.35}
-              metalness={0.6}
-              transparent
-              opacity={0.55}
-            />
-          </mesh>
-        )
-      })}
-    </>
+  const geometry = useMemo(() => new THREE.RingGeometry(0.15, 0.23, 20), [])
+  const material = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: '#a98a4e',
+        roughness: 0.35,
+        metalness: 0.6,
+        transparent: true,
+        opacity: 0.55,
+      }),
+    [],
   )
+
+  useLayoutEffect(() => {
+    const node = mesh.current
+    if (!node) return
+    const dummy = new THREE.Object3D()
+    cells.forEach((cell, index) => {
+      const [x, z] = toWorld(cell)
+      dummy.position.set(x, TILE_Y + 0.075, z)
+      dummy.rotation.set(-Math.PI / 2, 0, 0)
+      dummy.updateMatrix()
+      node.setMatrixAt(index, dummy.matrix)
+    })
+    node.instanceMatrix.needsUpdate = true
+  }, [cells])
+
+  return <instancedMesh ref={mesh} args={[geometry, material, cells.length]} />
 }

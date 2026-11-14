@@ -165,26 +165,6 @@ export const useGame = create<GameStore>((set, get) => {
     }, 1700)
   }
 
-  const scheduleBot = () => {
-    if (get().online) return
-    const state = get()
-    if (state.phase !== 'idle' || state.busy || state.game.over) return
-    if (!state.game.players[state.game.current]?.isBot) return
-    const delay = 650 + Math.random() * 550
-    setTimeout(() => {
-      const next = get()
-      if (
-        !next.online &&
-        next.phase === 'idle' &&
-        !next.busy &&
-        !next.game.over &&
-        next.game.players[next.game.current]?.isBot
-      ) {
-        void next.roll()
-      }
-    }, delay)
-  }
-
   /** Describes how a move should be animated, both locally and online. */
   const buildAnims = (game: GameState, move: Move) => {
     const mover = game.players[move.player]!
@@ -279,7 +259,6 @@ export const useGame = create<GameStore>((set, get) => {
       set({ game: endTurn(after.game), phase: 'idle', busy: false })
     }
 
-    scheduleBot()
   }
 
   const rollNow = async () => {
@@ -302,7 +281,6 @@ export const useGame = create<GameStore>((set, get) => {
     if (result.forfeit) {
       notify('Three sixes — turn skipped')
       set({ game: endTurn(get().game), phase: 'idle', busy: false })
-      scheduleBot()
       return
     }
 
@@ -312,7 +290,6 @@ export const useGame = create<GameStore>((set, get) => {
       notify('No legal move')
       await sleep(650)
       set({ game: endTurn(get().game), phase: 'idle', busy: false })
-      scheduleBot()
       return
     }
 
@@ -540,7 +517,6 @@ export const useGame = create<GameStore>((set, get) => {
         toast: null,
       })
       sfx.play('click')
-      scheduleBot()
     },
 
     goMenu: () => {
@@ -583,8 +559,9 @@ export const useGame = create<GameStore>((set, get) => {
     clearToast: () => set({ toast: null }),
 
     toggleMute: () => {
-      sfx.muted = !get().muted
-      set({ muted: sfx.muted })
+      const next = !get().muted
+      sfx.setMuted(next)
+      set({ muted: next })
     },
 
     setName: (name) => {

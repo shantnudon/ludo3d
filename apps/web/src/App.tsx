@@ -7,6 +7,7 @@ import { StartMenu } from './ui/StartMenu'
 import { GameOver } from './ui/GameOver'
 import { Toast } from './ui/Toast'
 import { useGame } from './store'
+import { ANTIALIAS, MAX_DPR } from './perf'
 
 export default function App() {
   const phase = useGame((state) => state.phase)
@@ -25,9 +26,15 @@ export default function App() {
     <div className="app">
       <Canvas
         shadows
-        dpr={[1, 1.8]}
+        frameloop="demand"
+        dpr={[1, MAX_DPR]}
         camera={{ position: [0, 20, 19], fov: 38, near: 0.1, far: 140 }}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={{
+          antialias: ANTIALIAS,
+          powerPreference: 'high-performance',
+          alpha: false,
+          stencil: false,
+        }}
       >
         <Scene />
       </Canvas>

@@ -1,17 +1,18 @@
 import { Environment, Lightformer } from '@react-three/drei'
+import { ENV_RESOLUTION, SHADOW_MAP } from '../perf'
 
 export function Lighting() {
   return (
     <>
       <hemisphereLight args={['#bcd6ff', '#0a0d14', 0.55]} />
-      <ambientLight intensity={0.35} />
+      <ambientLight intensity={0.32} />
 
       <directionalLight
         position={[7.5, 15, 9]}
         intensity={2.2}
         color="#fff3e0"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[SHADOW_MAP, SHADOW_MAP]}
         shadow-camera-left={-13}
         shadow-camera-right={13}
         shadow-camera-top={13}
@@ -31,7 +32,7 @@ export function Lighting() {
         color="#ffd9a8"
       />
 
-      <Environment resolution={128} frames={1}>
+      <Environment resolution={ENV_RESOLUTION} frames={1}>
         <Lightformer
           form="rect"
           intensity={2.4}

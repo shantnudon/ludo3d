@@ -151,6 +151,25 @@ Safe cells: the four start cells plus the star cells eight steps later
    fight the frame loop.
 5. **Instanced tiles.** 72 track tiles are one draw call, keeping mobile at 60fps.
 
+## Performance & battery
+
+A 3D board game is only nice if it does not eat the phone alive.
+
+- **Demand rendering.** The canvas runs with `frameloop="demand"` plus a small
+  scheduler that asks for a frame only while the dice tumbles, a pawn hops or
+  the game state changes. Idle board = **zero rendered frames** (measured 0
+  frames over 2s), so the GPU is genuinely asleep between turns.
+- **Capped pixel ratio** (1.5 desktop, 1.25 on touch devices), 512–1024 shadow
+  maps, antialiasing off on phones and a 64px environment map there.
+- **Draw calls.** 72 track tiles, 16 parking rings and 8 safe markers are
+  instanced; the table is one disc plus one additive glow plane.
+- **Cheaper chrome.** CSS blurs were reduced (backdrop-filter is expensive on
+  mobile GPUs) and the mute toggle now just ramps a master gain node instead of
+  muting every oscillator.
+- **Server.** Durable Object state is written only on stable turns instead of
+  every animation phase, empty rooms are deleted immediately, and abandoned
+  rooms are garbage collected by a 24h alarm.
+
 ## Rules implemented
 
 - Roll a six to bring a token out of the base.

@@ -5,27 +5,24 @@ import { CameraRig } from './CameraRig'
 import { DevBridge } from '../DevBridge'
 import { Dice } from './Dice'
 import { Lighting } from './Lighting'
+import { Scheduler } from './Scheduler'
 import { Tokens } from './Tokens'
 
 export function Scene() {
   return (
     <>
       <DevBridge />
+      <Scheduler />
       <color attach="background" args={['#05070c']} />
       <fog attach="fog" args={['#05070c', 42, 85]} />
 
       <Lighting />
       <CameraRig />
 
-      {/* Table the board rests on */}
+      {/* One large table disc is enough; a second layer only costs fill rate. */}
       <mesh rotation-x={-Math.PI / 2} position={[0, -0.47, 0]} receiveShadow>
-        <circleGeometry args={[48, 64]} />
+        <circleGeometry args={[44, 48]} />
         <meshStandardMaterial color="#0a0f18" roughness={0.96} metalness={0.05} />
-      </mesh>
-
-      <mesh rotation-x={-Math.PI / 2} position={[0, -0.46, 0]}>
-        <circleGeometry args={[19, 64]} />
-        <meshStandardMaterial color="#0d1522" roughness={0.9} metalness={0.08} />
       </mesh>
 
       <TableGlow />

@@ -10,6 +10,9 @@ export interface Env {
   ASSETS: Fetcher
 }
 
+/** Abandoned rooms are wiped after a day so storage does not creep up. */
+const ROOM_TTL = 24 * 60 * 60 * 1000
+
 const NAME_MAX = 16
 
 function cleanName(value: unknown, fallback: string): string {
@@ -36,7 +39,24 @@ export class RoomDurableObject implements DurableObject {
     this.state = state
     void state.blockConcurrencyWhile(async () => {
       await this.load()
+      if ((await this.state.storage.getAlarm()) === null) {
+        await this.state.storage.setAlarm(Date.now() + ROOM_TTL)
+      }
     })
+  }
+
+  /** Storage garbage collection: wipe rooms nobody came back to. */
+  async alarm(): Promise<void> {
+    const connected = [...this.sockets.values()].some(
+      (playerId) => playerId !== null,
+    )
+    if (connected) {
+      await this.state.storage.setAlarm(Date.now() + ROOM_TTL)
+      return
+    }
+    this.room?.dispose()
+    this.room = null
+    await this.state.storage.deleteAll()
   }
 
   private async load(): Promise<void> {
@@ -246,6 +266,11 @@ export class RoomDurableObject implements DurableObject {
     this.byPlayer.delete(playerId)
     this.sockets.set(socket, null)
     this.room.leave(playerId)
+    if (!this.room.hasPlayers()) {
+      this.room.dispose()
+      this.room = null
+      void this.state.storage.deleteAll()
+    }
   }
 
   private withPlayer(socket: WebSocket, run: (playerId: string) => void): void {

@@ -12,7 +12,7 @@ export const TIMING = {
   movePerCell: 95,
   captureExtra: 650,
   noMove: 700,
-  botThink: 600,
+  botThink: 450,
   selectTimeout: 30000,
 } as const
 

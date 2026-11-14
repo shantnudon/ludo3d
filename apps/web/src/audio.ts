@@ -1,9 +1,14 @@
 type SoundKind = 'roll' | 'hop' | 'capture' | 'home' | 'win' | 'click'
 
-/** Tiny synthesised sound effects, so the game ships without audio files. */
+/**
+ * Tiny synthesised sound effects, so the game ships without audio files.
+ * Everything routes through one master gain so muting is instant and the
+ * context can be suspended when the page is hidden.
+ */
 class Sfx {
   muted = false
   private ctx: AudioContext | null = null
+  private master: GainNode | null = null
   private noiseBuffer: AudioBuffer | null = null
 
   private get context(): AudioContext {
@@ -16,6 +21,20 @@ class Sfx {
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume()
     return this.ctx
+  }
+
+  private get output(): GainNode {
+    if (!this.master) {
+      this.master = this.context.createGain()
+      this.master.gain.value = this.muted ? 0 : 1
+      this.master.connect(this.context.destination)
+    }
+    return this.master
+  }
+
+  setMuted(muted: boolean) {
+    this.muted = muted
+    if (this.master) this.master.gain.value = muted ? 0 : 1
   }
 
   play(kind: SoundKind) {
@@ -71,7 +90,7 @@ class Sfx {
     amp.gain.setValueAtTime(0.0001, start)
     amp.gain.exponentialRampToValueAtTime(gain, start + 0.012)
     amp.gain.exponentialRampToValueAtTime(0.0001, start + duration)
-    osc.connect(amp).connect(ctx.destination)
+    osc.connect(amp).connect(this.output)
     osc.start(start)
     osc.stop(start + duration + 0.02)
   }
@@ -94,7 +113,7 @@ class Sfx {
       filter.frequency.value = 1400 + Math.random() * 900
       const amp = ctx.createGain()
       amp.gain.value = 0.16
-      source.connect(filter).connect(amp).connect(ctx.destination)
+      source.connect(filter).connect(amp).connect(this.output)
       source.start(ctx.currentTime + time)
     }
   }
