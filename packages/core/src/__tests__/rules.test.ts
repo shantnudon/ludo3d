@@ -3,6 +3,7 @@ import { COLORS, absIndex } from '../board'
 import {
   type GameState,
   POS_HOME,
+  completionPercent,
   createGame,
   endTurn,
   legalMoves,
@@ -113,6 +114,17 @@ describe('captures', () => {
     expect(move.captures).toHaveLength(2)
     const after = playMove(game, move)
     expect(after.players[3]!.tokens).toEqual([-1, -1, -1, -1])
+  })
+
+  it('counts captures per player', () => {
+    const game = makeGame({
+      dice: 2,
+      tokens: { red: [0, -1, -1, -1], blue: [15, -1, -1, -1] },
+    })
+    expect(game.captures).toEqual([0, 0, 0, 0])
+    const move = legalMoves(game).find((m) => m.from === 0)!
+    const after = playMove(game, move)
+    expect(after.captures).toEqual([1, 0, 0, 0])
   })
 
   it('never captures on a safe cell', () => {
@@ -249,6 +261,15 @@ describe('finishing and ranking', () => {
     const move = legalMoves(game).find((m) => m.from === 55)!
     const after = endTurn(playMove(game, move))
     expect(after.current).toBe(1)
+  })
+})
+
+describe('completion percentage', () => {
+  it('measures how far a player is from home', () => {
+    expect(completionPercent([-1, -1, -1, -1])).toBe(0)
+    expect(completionPercent([56, 56, 56, 56])).toBe(100)
+    expect(completionPercent([56, -1, -1, -1])).toBe(25)
+    expect(completionPercent([10, -1, -1, -1])).toBe(5)
   })
 })
 

@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { COLOR_HEX, POS_HOME } from '@ludo/core'
+import { COLOR_HEX, POS_HOME, completionPercent } from '@ludo/core'
 import { useGame } from '../store'
 import { COLOR_LABEL } from './labels'
 
@@ -55,6 +55,8 @@ export function Hud() {
         <div className="players">
           {game.players.map((player, index) => {
             const homes = player.tokens.filter((pos) => pos === POS_HOME).length
+            const captured = (game.captures?.[index] ?? 0) > 0
+            const percent = completionPercent(player.tokens)
             const isActive = player.color === active.color
             const style = { '--accent': COLOR_HEX[player.color] } as CSSProperties
             return (
@@ -69,7 +71,17 @@ export function Hud() {
               >
                 <i className="dot" />
                 <span className="name">{nameOf(index)}</span>
-                <span className="homes">{homes}/4</span>
+                <i
+                  className={`capture ${captured ? 'has' : 'none'}`}
+                  title={
+                    captured
+                      ? `Captured ${game.captures?.[index] ?? 0} token(s)`
+                      : 'No captures yet'
+                  }
+                />
+                <span className="percent" title={`${homes}/4 tokens home`}>
+                  {percent}%
+                </span>
               </div>
             )
           })}

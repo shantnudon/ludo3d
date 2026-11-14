@@ -29,6 +29,8 @@ export interface GameState {
   extraTurn: boolean
   /** Player indices in finishing order. */
   rankings: number[]
+  /** Tokens each player has captured this game, indexed by player. */
+  captures: number[]
   over: boolean
   /** Increments on every turn hand-over, useful for animation keys. */
   turn: number
@@ -72,6 +74,7 @@ export function createGame(humans: Color | Color[] = 'blue'): GameState {
     sixStreak: 0,
     extraTurn: false,
     rankings: [],
+    captures: players.map(() => 0),
     over: false,
     turn: 0,
   }
@@ -188,11 +191,15 @@ export function playMove(state: GameState, move: Move): GameState {
   const over = rankings.length >= players.length - 1
   const extraTurn =
     state.diceValue === 6 || move.captures.length > 0 || move.reachedHome
+  const captures = [...(state.captures ?? state.players.map(() => 0))]
+  captures[state.current] =
+    (captures[state.current] ?? 0) + move.captures.length
 
   return {
     ...state,
     players,
     rankings,
+    captures,
     extraTurn,
     over,
     diceValue: null,
@@ -222,6 +229,18 @@ export function endTurn(state: GameState): GameState {
     extraTurn: false,
     turn: state.turn + 1,
   }
+}
+
+/** Steps a token needs to travel from base to home. */
+export const TOKEN_STEPS = 57
+
+/** How far a player is from winning, 0-100. */
+export function completionPercent(tokens: number[]): number {
+  const done = tokens.reduce(
+    (sum, pos) => sum + (pos < 0 ? 0 : Math.min(TOKEN_STEPS, pos + 1)),
+    0,
+  )
+  return Math.round((done / (tokens.length * TOKEN_STEPS)) * 100)
 }
 
 /** Final standings including the last player, who never "finishes". */

@@ -815,3 +815,29 @@ canvas {
 .seat.empty .seat-tag {
   color: #a98a4e;
 }
+
+/* --------------------------------------------- capture status + progress */
+
+.capture {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.capture.has {
+  background: #34b866;
+  box-shadow: 0 0 7px rgba(52, 184, 102, 0.85);
+}
+
+.capture.none {
+  background: #e0433f;
+  box-shadow: 0 0 7px rgba(224, 67, 63, 0.75);
+}
+
+.percent {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #a7b7cc;
+  letter-spacing: 0.02em;
+}

@@ -26,6 +26,9 @@ filled by bots. Deployed on Cloudflare Workers + Durable Objects.
 - **Online rooms**: create a room, share the 4-letter code (or invite link), and
   friends join from any device. The server is authoritative, seats can be
   reclaimed after a refresh, and anyone who drops off is taken over by a bot.
+- **Live scoreboard**: every player chip shows how much of the race is done
+  (percentage of the 57 steps per token) plus a capture light — red until that
+  player sends someone back to base, green after the first capture.
 - **Animation**: hop-by-hop pawn movement, capture arcs, dice tumble that always
   lands on the value the rules already decided, camera-fitting for any screen.
 - **Mobile ready**: touch controls, responsive HUD, portrait framing, PWA
@@ -61,12 +64,12 @@ commands — the browser connects to `ws://localhost:3001/ws`.
 
 ```bash
 npx wrangler login   # once, opens the browser
-pnpm deploy          # builds the client, uploads assets + worker + DO
+pnpm run deploy     # builds the client, uploads assets + worker + DO
 ```
 
 The Worker serves the built client from `apps/web/dist` (SPA fallback) and routes
 `/ws?code=XXXX` to the Durable Object for that room, so everything lives on one
-origin. `pnpm deploy` prints the `*.workers.dev` URL.
+origin. `pnpm run deploy` prints the `*.workers.dev` URL.
 
 ## Project layout
 
